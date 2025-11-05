@@ -1,0 +1,78 @@
+@startuml
+left to right direction
+skinparam rectangle {
+  BorderColor #406E8E
+  BackgroundColor #EEF5FF
+}
+skinparam database {
+  BackgroundColor #E9F7EF
+  BorderColor #2E7D32
+}
+skinparam cloud {
+  BackgroundColor #FFF3E0
+  BorderColor #EF6C00
+}
+skinparam actorStyle awesome
+
+rectangle "Сервис тегирования\n(LLM локально: NER+классификатор)\n[TAG assigner]\n(PEP: вход в хранилища/почту)" as Tagger
+database "Реестр метаданных/каталога\n(Apache Atlas / OpenMetadata)\n[хранение TAG, lineage, политики]" as Catalog
+rectangle "Движок политик (PDP)\n(OPA/Rego, ABAC по TAG)\n(PEP: middleware, макросы 1С,\nExchange транспортные правила)" as PDP
+
+actor "Пациент" as Patient
+
+rectangle "Ресепшен\n(запись, договоры)\n(TAG: PII,DOC | MASK на экране | OBF логи)" as Reception
+rectangle "Врач / Мед.специалист\n(приём, назначения)\n(TAG: MED | MASK лишних полей | OBF логи)" as Doctor
+rectangle "Кассир\n(приём оплаты)\n(TAG: PAY | MASK реквизитов | TOK id платежей | OBF логи)" as Cashier
+rectangle "Бухгалтерия\n(процессинг платежей)\n(TAG: PAY,INT | MASK в отчётах | OBF id)" as Accounting
+rectangle "Склад\n(учёт ТМЦ)\n(TAG: INT | MASK персональных полей)" as Warehouse
+
+cloud "Лаборатория (внешняя)\n(TAG: MED,PII; ENC канал/VPN;\nOBF patient_id у партнёра)" as Lab
+cloud "Почта (Exchange)\n(ENC TLS, ENC вложений; PEP: правила X-Header TAG)" as Mail
+
+database "Журнал записей (Excel)\n(ENC at-rest; TAG: PII; MASK в выгрузках)" as Journal
+database "Реестр пациентов (Excel)\n(ENC at-rest; TAG: PII; MASK в списках)" as Patients
+database "Медкарты/сканы (PDF/JPG)\n(ENC at-rest; TAG: MED,DOC;\nOBF имён файлов/EXIF)" as MedCards
+database "Результаты анализов (файлы)\n(ENC at-rest; TAG: MED;\nMASK в выборках)" as LabResults
+database "Платёжный реестр (Excel)\n(ENC at-rest; TAG: PAY;\nMASK PAN/СНИЛС)" as PayExcel
+database "1С: Бухгалтерия (file)\n(ENC файловой БД/транспорт; TAG: PAY,INT;\nMASK в печатных формах)" as OneCAcc
+database "1С: Торговля и склад (file)\n(ENC файловой БД/транспорт; TAG: INT)" as OneCInv
+
+Tagger -down-> Catalog : "Запись/обновление TAG, PII/MED/PAY, доверенность, срок хранения"
+PDP -down-> Catalog : "Чтение TAG/политик (ABAC)\n+ lineage для решений"
+Reception -left-> Tagger : "Автотегирование форм/файлов (NER) (TAG: PII,DOC)"
+Doctor -left-> Tagger : "Тегирование записей/заключений (TAG: MED)"
+Cashier -left-> Tagger : "Тегирование чеков/реестров (TAG: PAY)"
+Mail -left-> Tagger : "Тегирование исходящих/входящих писем\nпо телу/вложениям (X-Header: TAG)"
+
+Patient -down-> Reception : "Анкета/согласия [TAG: PII] (MIN,MASK; OBF логи; PEP UI)"
+
+Reception -down-> Journal : "Запись на приём [TAG: PII] (ENC at-rest; PEP SMB)"
+Reception -down-> Patients : "Профиль пациента [TAG: PII] (ENC; MASK списки; доступ по id; PEP)"
+Reception -down-> MedCards : "Сканы договоров/паспортов [TAG: DOC,PII]\n(ENC; OBF filename; PEP загрузки)"
+Reception -down-> Mail : "Уведомления [TAG: PUB|PII] (MIN; ENC TLS; PEP транспорт)"
+
+Reception -right-> Doctor : "Карточка визита [TAG: PII->MED минимально]\n(MIN; MASK лишнего; OBF patient_id; PEP API)"
+
+Doctor -down-> MedCards : "Запись приёма/назначения [TAG: MED]\n(ENC; MASK partial; OBF выгрузки; PEP файловый)"
+
+Doctor -right-> Lab : "Направление [TAG: MED,PII] (ENC TLS/VPN; OBF/pseudonymize id; PEP шлюз)"
+Lab -left-> LabResults : "Хранение у партнёра [TAG: MED] (ENC у партнёра)"
+Lab -left-> Doctor : "Результаты (PDF/JPG) [TAG: MED]\n(ENC TLS/вложения; MASK превью; PEP почты)"
+
+Patient -down-> Cashier : "Оплата [TAG: PAY] (MASK PAN; TOK payment_id; OBF логи; PEP ККМ)"
+Cashier -down-> PayExcel : "Реестр оплат [TAG: PAY] (ENC; MASK PAN/links; PEP SMB)"
+Cashier -down-> OneCAcc : "Документ оплаты [TAG: PAY] (ENC канал; MASK печать; PEP 1С)"
+Cashier -left-> Mail : "Чек/квитанция [TAG: PAY|PUB] (ENC TLS; MASK реквизитов; PEP транспорт)"
+
+PayExcel -down-> Accounting : "Сверка [TAG: PAY,INT] (MASK отчёты; MIN; PEP 1С)"
+Accounting -right-> OneCInv : "Обмен справочниками [TAG: INT]\n(ENC канал; PEP 1С)"
+
+Warehouse -right-> OneCInv : "Приход/расход ТМЦ [TAG: INT]\n(ENC канал; MASK персональных полей; PEP 1С)"
+
+Lab -down-> Mail : "Результаты/уведомления [TAG: MED]\n(ENC TLS; ENC вложений; OBF темы; PEP транспорт)"
+Mail -down-> MedCards : "Сохранение вложений [TAG: MED]\n(ENC at-rest; OBF filename; PEP файловый)"
+
+
+Catalog -[hidden]down- PDP
+
+@enduml

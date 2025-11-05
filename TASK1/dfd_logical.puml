@@ -1,0 +1,68 @@
+@startuml
+
+left to right direction
+skinparam rectangle {
+  BorderColor #406E8E
+  BackgroundColor #EEF5FF
+}
+skinparam database {
+  BackgroundColor #E9F7EF
+  BorderColor #2E7D32
+}
+skinparam cloud {
+  BackgroundColor #FFF3E0
+  BorderColor #EF6C00
+}
+skinparam actorStyle awesome
+
+actor "Пациент" as Patient
+
+rectangle "Ресепшен\n(запись, договоры)" as Reception
+rectangle "Врач / Мед.специалист\n(приём, назначения)" as Doctor
+rectangle "Кассир\n(приём оплаты)" as Cashier
+rectangle "Бухгалтерия\n(процессинг платежей)" as Accounting
+rectangle "Склад\n(учёт ТМЦ)" as Warehouse
+
+cloud "Лаборатория\n(внешняя система)" as Lab
+
+database "Журнал записей\n(Excel / общий диск)" as Journal
+database "Реестр пациентов\n(Excel / общий диск)" as Patients
+database "Медкарты и сканы\n(PDF/JPG / общий диск)" as MedCards
+database "Результаты анализов\n(PDF/JPG / общий диск)" as LabResults
+database "Платёжный реестр\n(Excel / общий диск)" as PayExcel
+database "1С: Бухгалтерия\n(файловый режим)" as OneCAcc
+database "1С: Торговля и склад\n(файловый режим)" as OneCInv
+cloud "Почта (Exchange)\n(внутренний сервер)" as Mail
+
+Patient -down-> Reception : Персональные данные (PII),\nконтактные данные, согласия
+
+Reception -down-> Journal : Запись на приём
+Reception -down-> Patients : Создание/обновление профиля пациента
+Reception -down-> MedCards : Загрузка сканов договоров/паспортов
+Reception -down-> Mail : Уведомления/переписка (PII)
+
+Reception -right-> Doctor : Расписание, карточка визита,\nосн. данные пациента (минимум PII)
+
+Doctor -down-> MedCards : Записи о приёме, назначение анализов,\nзаключения (мед.тайна)
+
+Doctor -right-> Lab : Направление на анализы (PII + мед.данные)\nРезультаты анализов (файлы PDF/JPG, e-mail)
+Lab -left-> LabResults : Хранение результатов (внешне)
+
+Patient -down-> Cashier : Оплата услуг
+Cashier -down-> PayExcel : Запись оплаты (Excel)
+Cashier -down-> OneCAcc : Документ оплаты (через 1С)
+Cashier -left-> Mail : Отправка чеков/квитанций (по запросу)
+
+PayExcel -down-> Accounting : Реестр оплат (для сверки)
+Accounting -right-> OneCInv : Обмен справочниками/документами
+
+Warehouse -right-> OneCInv : Приход/расход ТМЦ, заявки на закупку
+
+Lab -down-> Mail : Результаты/уведомления (письма с вложениями)
+Mail -down-> MedCards : Сохранение вложений в карту (вручную)
+
+Reception -up-> Patient : Подтверждение записи/памятки (почта/звонок)
+Cashier -up-> Patient : Чек/квитанция
+Doctor -up-> Patient : Рекомендации, результаты (иногда по почте)
+
+@enduml

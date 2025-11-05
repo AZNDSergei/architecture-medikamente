@@ -1,0 +1,51 @@
+@startuml
+left to right direction
+skinparam node {
+  BackgroundColor #F3F6FA
+  BorderColor #5C6F91
+}
+skinparam database {
+  BackgroundColor #E9F7EF
+  BorderColor #2E7D32
+}
+skinparam cloud {
+  BackgroundColor #FFF3E0
+  BorderColor #EF6C00
+}
+
+cloud "Интернет" as Internet
+cloud "Лаборатория (External)\nAPI/электронная почта" as ExtLab
+
+node "Рабочие станции\n(админ/врачи/кассиры)\nWindows + MS Office" as PCs
+node "KKM\n(контрольно-кассовые машины)" as KKM
+
+node "Windows Server 2022\n(он-прем, тот же офис)" as WinSrv {
+  node "AD/DNS/DHCP/LDAP" as AD
+  node "Exchange Mail Server" as EXC
+  node "Файловый сервер (SMB)" as FileSrv
+  database "1С: Бухгалтерия\n(файловая БД на шару)" as OneCAccFS
+  database "1С: Торговля и склад\n(файловая БД на шару)" as OneCInvFS
+  database "Общий диск:\nExcel/JPG/PDF (журналы,\nмедкарты, оплаты)" as SharedFS
+}
+
+PCs --> FileSrv : SMB/CIFS\n(чтение/запись Excel, JPG, PDF)
+PCs --> OneCAccFS : SMB/CIFS\n(файловый режим 1С)
+PCs --> OneCInvFS : SMB/CIFS\n(файловый режим 1С)
+PCs <--> EXC : MAPI/SMTP/IMAP\n(почта с вложениями)
+
+KKM --> PCs : Локальная сеть TCP/IP\n(драйвер ККМ)
+KKM --> OneCAccFS : TCP/IP OLE через компоненту 1С\n(чеки/отчёты)
+
+PCs --> EXC : Отправка направлений/получение результатов\n(письма с вложениями)
+EXC --> PCs : Полученные результаты
+ExtLab <--> Internet
+EXC <--> Internet : Входящая/исходящая почта (через шлюз/relay)
+PCs --> SharedFS : Сохранение/копирование файлов из почты\nв медкарты/журналы
+
+PCs --> AD : Доменная аутентификация (Kerberos/NTLM)
+WinSrv --> AD : Управление доступом к шарам (ACL)
+
+Internet -down-> EXC : SMTP/IMAP relay
+ExtLab -down-> EXC : Письма с вложениями (PDF/JPG)
+
+@enduml

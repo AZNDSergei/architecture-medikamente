@@ -1,0 +1,62 @@
+@startuml
+!define C4P https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master
+!includeurl C4P/C4_Container.puml
+LAYOUT_WITH_LEGEND()
+
+Person(de, "Python dev-новый сотрудник", "Поддерживает каналы загрузки и пайплайны")
+Person(analyst, "Аналитик/DS", "Доступ к витринам через Privacy Gate")
+Person(src1, "Источники: 1С/Excel/Сканы", "Экспорт/выгрузки, SFTP/S3 drop")
+
+System_Boundary(sys, "Data Classification & Ingestion Layer (PbD)") {
+
+  Container(nifi, "Apache NiFi (Cluster)", "Flow Management", "Приём батчей, маршрутизация, первичная нормализация, авто-детект схем, управление очередями")
+  Container(sr, "Schema Registry", "Avro/JSON Schema", "Каталог схем, версии, контроль совместимости, фиксация дрейфа (backward/forward)")
+  Container(af, "Apache Airflow (Managed)", "Orchestrator", "DAG: ingest -> classify -> деидентификация -> quality -> publish -> lineage")
+  Container(classif, "Classification Service", "LLM+NER (Natasha/DeepPavlov) + Rules", "Извлечение PII/MED/PAY, присвоение меток (PII, MED, PAY, DOC, INT, PUB), confidence; MASK/MIN/TOK")
+  Container(re, "Rule-based Tagger", "Regex/YAML Rules", "Регулярные выражения/словари для детекции квазиидентификаторов")
+  Container(sd, "Schema Drift Detector", "Diff/Stats", "Сравнение схем, обнаружение новых полей, алерты, авто-черные/белые списки")
+  Container(ui, "Steward (Analyst) Console", "Web UI", "Ручная валидация/апелляции тегов, настройка порогов confidence, контроль quarantine")
+  Container(pgate, "Privacy Gate", "Service", "маски при выдаче; пропускает только безопасные запросы")
+
+  ContainerDb(s3_land, "S3 Landing", "Object Storage (SSE-KMS)", "Прилёт файлов из источников, временное хранение (доступ ограничен)")
+  ContainerDb(s3_quar, "S3 Quarantine", "Object Storage (SSE-KMS)", "Низкая уверенность/неизвестная схема; ожидание ручной проверки")
+  ContainerDb(s3_bronze, "Bronze (сырые данные)", "Object Storage (SSE-KMS, Parquet)", "Raw+Tags после классификации, неизменяемо (append-only)")
+  ContainerDb(silver_sens, "Silver (Restricted)", "PostgreSQL/S3", "Очищенные, деидентифицированные, чувствительные таблицы (с тегами)")
+  ContainerDb(silver_pub, "Silver (General)", "PostgreSQL/S3", "Очищенные, без чувствительных полей; минимизация по умолчанию")
+  ContainerDb(gold, "Gold (Marts)", "ClickHouse", "Агрегаты/витрины; доступ только через Privacy Gate")
+
+  Container(kms, "KMS + Lockbox", "Keys & Secrets", "Ключи шифрования, секреты токенизации; ротация")
+  Container(met, "Metrics & Logging", "Cloud Logging/Prometheus", "Метрики качества классификации, латентность, throughput, дрейф схем, алерты SLA")
+}
+
+Rel(src1, nifi, "Батчи файлов / экспорт", "SFTP/S3/TLS")
+Rel(nifi, sr, "Регистрация/проверка схем", "HTTP(S)")
+Rel(nifi, s3_land, "Сохранение прилёта", "S3 (SSE-KMS)")
+Rel(nifi, sd, "Сигналы о дрейфе", "events")
+Rel(nifi, af, "Триггеры DAG", "events")
+
+Rel(af, classif, "Классификация батча", "gRPC/HTTP")
+Rel(classif, re, "Sanity-check правил", "in-proc/HTTP")
+Rel(classif, kms, "TOK/MASK/MIN (ключи/секреты)")
+Rel(af, s3_bronze, "Write raw+tags (append-only)", "S3")
+
+Rel(sd, ui, "Алерт о схеме/порогах", "HTTP")
+Rel(classif, s3_quar, "Низкий confidence -> карантин", "S3")
+Rel(ui, s3_quar, "Ручная проверка/разрешение", "Web UI")
+Rel(ui, af, "Повторная обработка батча", "Trigger DAG")
+
+Rel(af, silver_sens, "деидентификация publish (чувствительные)", "SQL/S3")
+Rel(af, silver_pub, "Publish (общие)", "SQL/S3")
+Rel(pgate, gold, "Чтение агрегатов после проверок", "SQL")
+Rel(analyst, pgate, "Запросы к витринам", "SSO/TLS")
+
+Rel(af, met, "Статусы DAG, SLAs")
+Rel(classif, met, "Precision/Recall/F1, latency, throughput")
+Rel(sd, met, "Schema drift rate")
+Rel(s3_bronze, met, "Объёмы/скорость прироста")
+Rel(kms, met, "Ротация ключей/ошибки")
+
+Rel(de, nifi, "Конфигурация потоков")
+Rel(de, af, "Разработка DAG")
+Rel(analyst, ui, "Валидация/политики")
+@enduml
